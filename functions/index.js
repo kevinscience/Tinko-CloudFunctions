@@ -210,6 +210,7 @@ function initializeFriendShip(friendFacebookId,facebookId,userData){
             var meetsRef = firestoreDb.collection('Meets');
             var meetsQueryRef = meetsRef.where('creator', '==', friendFacebookId);
             const pr3 = meetsQueryRef.get().then(snapshot => {
+                var batch = firestoreDb.batch();
                 snapshot.forEach(doc => {
                     //console.log(doc.id, '=>', doc.data());
                     //modify meet selectedFriendsList
@@ -219,10 +220,15 @@ function initializeFriendShip(friendFacebookId,facebookId,userData){
                         var timeDoc = meet.participatedUsersList[friendFacebookId];
                         var selectedFriendsDoc = meet.selectedFriendsList;
                         selectedFriendsDoc[facebookId] = timeDoc;
-                        return meetsRef.doc(doc.id).update({selectedFriendsList:selectedFriendsDoc}).catch(err => {
-                            console.log('Error updating documents', err);
-                        });
+                        var meetRef = meetsRef.doc(doc.id);
+                        batch.update(meetRef, {selectedFriendsList:selectedFriendsDoc});
+                        // return meetsRef.doc(doc.id).update({selectedFriendsList:selectedFriendsDoc}).catch(err => {
+                        //     console.log('Error updating documents', err);
+                        // });
                     }
+                });
+                return batch.commit().catch(err => {
+                    console.log('Error getting documents', err);
                 });
             }).catch(err => {
                 console.log('Error getting documents', err);
