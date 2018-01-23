@@ -149,61 +149,63 @@ exports.initializeNewUser = functions.https.onRequest((req,res) => {
     }
     //console.log('facebookId', facebookId);
 
-    var userRef = firestoreDb.collection('Users').doc(facebookId);
-    return userRef.get()
-        .then(doc => {
-            if (doc.exists) {
-                //console.log('Document data exist:', doc.data());
-                res.status(200).send('ok');
-             } else { //user does not exist
-                //console.log('No such document!');
-                var userData = {
-                    facebookId : facebookId,
-                    username: name,
-                    email: email,
-                    uid: uid,
-                    photoURL: "https://graph.facebook.com/" + facebookId + "/picture?type=normal",
-                    gender: gender,
-                    location: location
-                };
-                return userRef.set(userData).then(ref => {
-                    //console.log('Added document with ID: ', ref.id);
-                    var friendsList = req.body.friends.data;
-                    //console.log('friendsList: ', friendsList);
-                    //friendsList:  [ { id: [ '1503367089694364', '107771053169905' ],name: [ 'Xue Donghua', 'Kevin Schrute' ] } ]
-                    var friendsIdList = friendsList[0].id;
-                    //console.log('friendsIdList: ', friendsIdList);
-                    //FOR LOOP for Friends adding operation
-                    Promise.map(friendsIdList, function (friendFacebookId){
-                        initializeFriendShip(friendFacebookId, facebookId, userData);
-                    }).then(()=>{
-                        res.status(200).send('ok');
-                    });
-                }).catch(err => {
-                    console.log('Error getting documents', err);
-                });
-                
-            }
-        })
-        .catch(err => {
-            console.log('Error getting document', err);
-            res.status(500).send('test error');
+     var userRef = firestoreDb.collection('Users').doc(facebookId);
+     var userData = {
+        facebookId : facebookId,
+        username: name,
+        email: email,
+        uid: uid,
+        photoURL: "https://graph.facebook.com/" + facebookId + "/picture?type=normal",
+        gender: gender,
+        location: location
+    };
+    return userRef.set(userData).then(ref => {
+        //console.log('Added document with ID: ', ref.id);
+        var friendsList = req.body.friends.data;
+        //console.log('friendsList: ', friendsList);
+        //friendsList:  [ { id: [ '1503367089694364', '107771053169905' ],name: [ 'Xue Donghua', 'Kevin Schrute' ] } ]
+        var friendsIdList = friendsList[0].id;
+        //console.log('friendsIdList: ', friendsIdList);
+        //FOR LOOP for Friends adding operation
+        Promise.map(friendsIdList, function (friendFacebookId){
+            initializeFriendShip(friendFacebookId, facebookId);
+        }).then(()=>{
+            res.status(200).send('ok');
         });
+    }).catch(err => {
+        console.log('Error getting documents', err);
+    });
+    // return userRef.get()
+    //     .then(doc => {
+    //         if (doc.exists) {
+    //             //console.log('Document data exist:', doc.data());
+    //             res.status(200).send('ok');
+    //          } else { //user does not exist
+    //             //console.log('No such document!');
+                
+                
+    //         }
+    //     })
+    //     .catch(err => {
+    //         console.log('Error getting document', err);
+    //         res.status(500).send('test error');
+    //     });
 });
 
-function initializeFriendShip(friendFacebookId,facebookId,userData){
+function initializeFriendShip(friendFacebookId,facebookId){
     //console.log('friendFacebookId: ', friendFacebookId);
     var userRef = firestoreDb.collection('Users').doc(facebookId);
     var friendDocRef = firestoreDb.collection('Users').doc(friendFacebookId);
     return friendDocRef.get().then(doc => {
         if(doc.exists){
-            var friendDocData = doc.data();
-            //my ref add friend data
-            const pr1 = userRef.collection('Friends_List').doc(friendFacebookId).set(friendDocData).catch(err => {
+            //my ref add friend facebookId
+            const pr1 = userRef.collection('Friends_List').doc(friendFacebookId)
+            .set({facebookId:friendFacebookId}).catch(err => {
                 console.log('Error getting documents', err);
             });
-            //friend ref add my data
-            const pr2 = friendDocRef.collection('Friends_List').doc(facebookId).set(userData).catch(err => {
+            //friend ref add my facebookId
+            const pr2 = friendDocRef.collection('Friends_List').doc(facebookId)
+            .set({facebookId:facebookId}).catch(err => {
                 console.log('Error getting documents', err);
             });
             //add user to friends meet if allFriends = true
@@ -238,3 +240,38 @@ function initializeFriendShip(friendFacebookId,facebookId,userData){
     });
 }
 
+exports.sendAddFriendRequest = functions.https.onRequest((req,res) => {
+    const requester = req.body.requester;
+    const responsor = req.body.responsor;
+    console.log('requester: ', requester, ' responsor: ', responsor);
+    //Send a notification
+    //Create a doc in NewFriendFolder
+    var addFriendRequestRef = firestoreDb.collection('Users').doc(responsor)
+                                         .collection('NewFriendsFolder').doc(requester);
+    return addFriendRequestRef.get()
+    .then(doc => {
+        if (!doc.exists) {
+            //console.log('No such document!');
+            var requestDic = {
+                requester: requester,
+                responsor: responsor,
+                requestTime: Date.now(),
+                type:0,
+                read:false
+            }
+            return addFriendRequestRef.set(requestDic).then(()=>{
+                res.status(200).send('ok');
+            }).catch(err => {
+                console.log('Error getting documents', err);
+                res.status(500).send('error');
+            });
+        } else {
+            //console.log('Document data:', doc.data());
+            res.status(200).send('ok');
+        }
+    })
+    .catch(err => {
+        console.log('Error getting document', err);
+        res.status(500).send('error');
+    });
+});
