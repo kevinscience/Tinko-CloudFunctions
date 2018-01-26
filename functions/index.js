@@ -243,6 +243,7 @@ function initializeFriendShip(friendFacebookId,facebookId){
 exports.sendAddFriendRequest = functions.https.onRequest((req,res) => {
     const requester = req.body.requester;
     const responsor = req.body.responsor;
+    const requestMessage = req.body.requestMessage;
     console.log('requester: ', requester, ' responsor: ', responsor);
     //Send a notification
     //Create a doc in NewFriendFolder
@@ -257,7 +258,8 @@ exports.sendAddFriendRequest = functions.https.onRequest((req,res) => {
                 responsor: responsor,
                 requestTime: Date.now(),
                 type:0,
-                read:false
+                read:false,
+                requestMessage:requestMessage
             }
             return addFriendRequestRef.set(requestDic).then(()=>{
                 res.status(200).send('ok');
@@ -275,3 +277,118 @@ exports.sendAddFriendRequest = functions.https.onRequest((req,res) => {
         res.status(500).send('error');
     });
 });
+
+
+exports.initializeTwoWayFriendship = functions.https.onRequest((req,res) => {
+    const friendFacebookId = req.body.requester;
+    const facebookId = req.body.responsor;
+    var userRef = firestoreDb.collection('Users').doc(facebookId);
+    var friendDocRef = firestoreDb.collection('Users').doc(friendFacebookId);
+    return friendDocRef.get().then(doc => {
+        if(doc.exists){
+            //my ref add friend facebookId
+            const pr1 = userRef.collection('Friends_List').doc(friendFacebookId)
+            .set({facebookId:friendFacebookId}).catch(err => {
+                console.log('Error getting documents', err);
+            });
+            //friend ref add my facebookId
+            const pr2 = friendDocRef.collection('Friends_List').doc(facebookId)
+            .set({facebookId:facebookId}).catch(err => {
+                console.log('Error getting documents', err);
+            });
+            //add user to friends meet if allFriends = true
+            var meetsRef = firestoreDb.collection('Meets');
+            var friendMeetsQueryRef = meetsRef.where('creator', '==', friendFacebookId);
+            const pr3 = friendMeetsQueryRef.get().then(snapshot => {
+                var batch = firestoreDb.batch();
+                snapshot.forEach(doc => {
+                    //console.log(doc.id, '=>', doc.data());
+                    //modify meet selectedFriendsList
+                    var meet = doc.data();
+                    var allFriends = meet.allFriends;
+                    if(allFriends){
+                        var timeDoc = meet.participatedUsersList[friendFacebookId];
+                        var selectedFriendsDoc = meet.selectedFriendsList;
+                        selectedFriendsDoc[facebookId] = timeDoc;
+                        var meetRef = meetsRef.doc(doc.id);
+                        batch.update(meetRef, {selectedFriendsList:selectedFriendsDoc});
+                        // return meetsRef.doc(doc.id).update({selectedFriendsList:selectedFriendsDoc}).catch(err => {
+                        //     console.log('Error updating documents', err);
+                        // });
+                    }
+                });
+                return batch.commit().catch(err => {
+                    console.log('Error getting documents', err);
+                });
+            }).catch(err => {
+                console.log('Error getting documents', err);
+            });
+
+            //add friends to users meet if allFriends = true
+            var userMeetsQueryRef = meetsRef.where('creator', '==', facebookId);
+            const pr4 = userMeetsQueryRef.get().then(snapshot => {
+                var batch = firestoreDb.batch();
+                snapshot.forEach(doc => {
+                    //console.log(doc.id, '=>', doc.data());
+                    //modify meet selectedFriendsList
+                    var meet = doc.data();
+                    var allFriends = meet.allFriends;
+                    if(allFriends){
+                        var timeDoc = meet.participatedUsersList[facebookId];
+                        var selectedFriendsDoc = meet.selectedFriendsList;
+                        selectedFriendsDoc[friendFacebookId] = timeDoc;
+                        var meetRef = meetsRef.doc(doc.id);
+                        batch.update(meetRef, {selectedFriendsList:selectedFriendsDoc});
+                    }
+                });
+                return batch.commit().catch(err => {
+                    console.log('Error getting documents', err);
+                });
+            }).catch(err => {
+                console.log('Error getting documents', err);
+            });
+            //const pr5 = sendAddFriendRequestAcceptedReceipt(facebookId,friendFacebookId);
+            return Promise.all([pr1,pr2,pr3,pr4]).then(()=>{
+                res.status(200).send('ok');
+                return sendAddFriendRequestAcceptedReceipt(facebookId,friendFacebookId);
+            }).catch(err => {
+                console.log('Error', err);
+                res.status(500).send('error');
+            });;
+        }else {
+            console.log('Doc does not exist', err);
+            res.status(500).send('error');
+        }
+    }).catch(err => {
+        console.log('Error', err);
+        res.status(500).send('error');
+    });
+});
+
+function sendAddFriendRequestAcceptedReceipt(fromFacebookId, toFacebookId){
+    const requestMessage = 'Friend Request Accepted';
+    //Send a notification
+    //Create a doc in NewFriendFolder
+    var addFriendRequestRef = firestoreDb.collection('Users').doc(toFacebookId)
+                                         .collection('NewFriendsFolder').doc(fromFacebookId);
+    return addFriendRequestRef.get()
+    .then(doc => {
+        if (!doc.exists) {
+            //console.log('No such document!');
+            var requestDic = {
+                requester: fromFacebookId,
+                responsor: toFacebookId,
+                requestTime: Date.now(),
+                type:1,
+                read:false,
+                requestMessage:requestMessage
+            }
+            return addFriendRequestRef.set(requestDic).catch(err => {
+                console.log('Error getting documents', err);
+            });
+        }
+    })
+    .catch(err => {
+        console.log('Error getting document', err);
+    });
+}
