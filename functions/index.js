@@ -70,9 +70,9 @@ exports.removeExpiredMeets = functions.https.onRequest((req, res) => {
 
 exports.participateMeet = functions.https.onRequest((req,res) => {
     console.log('get in participateMeet');
-    const userFacebookId = String(req.query.userFacebookId);
+    const userFacebookId =req.body.userFacebookId;
     console.log('userFacebookId: ' + userFacebookId);
-    const meetId = String(req.query.meetId);
+    const meetId = req.body.meetId;
     console.log('meetId: ' + meetId);
     var meetRef = firestoreDb.collection('Meets').doc(meetId);
     return meetRef.get().then(doc => {
@@ -99,9 +99,9 @@ exports.participateMeet = functions.https.onRequest((req,res) => {
 
 
 exports.leaveMeet = functions.https.onRequest((req,res) => {
-    const userFacebookId = String(req.query.userFacebookId);
+    const userFacebookId = req.body.userFacebookId;
     console.log('userFacebookId: ' + userFacebookId);
-    const meetId = String(req.query.meetId);
+    const meetId = req.body.meetId;
     console.log('meetId: ' + meetId);
     var meetRef = firestoreDb.collection('Meets').doc(meetId);
     return meetRef.get().then(doc => {
