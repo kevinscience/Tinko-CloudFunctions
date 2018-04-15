@@ -88,7 +88,20 @@ exports.participateMeet = functions.https.onRequest((req,res) => {
             var creatorUid = meet.creator;
             var timeDic = participatingUsersListDic[creatorUid];
             participatingUsersListDic[userUid] = timeDic;
-            meetRef.update({participatingUsersList: participatingUsersListDic});
+            let maxNo = meet.maxNo;
+            let parNo = Object.keys(meet.participatingUsersList).length;
+            let notFull = (parNo < maxNo) || (maxNo===1);
+            if(!notFull){
+                let selectedFriendsDic = meet.selectedFriendsList;
+                meetRef.update({
+                    participatingUsersList: participatingUsersListDic,
+                    selectedFriendsList:{},
+                    backupSelectedFriendsList:selectedFriendsDic,
+                    status:false,
+                });
+            } else {
+                meetRef.update({participatingUsersList: participatingUsersListDic});
+            }
             res.status(200).send('ok');
         }
     })
@@ -119,7 +132,87 @@ exports.leaveMeet = functions.https.onRequest((req,res) => {
                 res.status(500).send('Tinko Creator cannot leave');
             } else {
                 delete participatingUsersListDic[userUid];
-                meetRef.update({participatingUsersList: participatingUsersListDic});
+                let status = meet.status;
+                if(status){
+                    
+                    meetRef.update({participatingUsersList: participatingUsersListDic});
+                    res.status(200).send('ok');
+                } else {
+                    // if status is false, compare endTime with now.
+                    // of endTime < now, do the same thing, 
+                    // otherwise, put backupSelectedFriendsList back, set status = true
+                    let endTime = meet.endTime;
+                    let now = new Date();
+                    let maxNo = meet.maxNo;
+                    let parNo = Object.keys(meet.participatingUsersList).length;
+                    let notFull = (parNo < maxNo) || (maxNo===1);
+                    if(now<endTime && notFull){
+                        let backupSelectedFriendsDic = meet.backupSelectedFriendsList;
+                        meetRef.update({
+                            participatingUsersList: participatingUsersListDic,
+                            selectedFriendsList: backupSelectedFriendsDic,
+                            backupSelectedFriendsList:{},
+                            status:true,
+                        });
+                        res.status(200).send('ok');
+                    }else{
+                        meetRef.update({participatingUsersList: participatingUsersListDic});
+                        res.status(200).send('ok');
+                    }
+
+                }
+                
+            }
+        }
+    })
+    .catch(err => {
+        console.log('Error getting document', err);
+        res.status(500).send('error');
+    });
+    
+});
+
+
+exports.checkMeetStatus = functions.https.onRequest((req,res) => {
+    const meetId = req.body.meetId;
+    //console.log('meetId: ' + meetId);
+    var meetRef = firestoreDb.collection('Meets').doc(meetId);
+    return meetRef.get().then(doc => {
+        if (!doc.exists) {
+            //console.log('No such document!');
+            res.status(500).send('error');
+        } else {
+            //console.log('Document data:', doc.data());
+            var meet = doc.data();
+
+            let status = meet.status;
+            let selectedList;
+            if(status){
+                selectedList=meet.selectedFriendsList;
+            } else{
+                selectedList = meet.backupSelectedFriendsList;
+            }
+            
+            let endTime = meet.endTime;
+            let now = new Date();
+            let maxNo = meet.maxNo;
+            let parNo = Object.keys(meet.participatingUsersList).length;
+            let notFull = (parNo < maxNo) || (maxNo===1);
+            if (now < endTime && notFull){
+                //console.log('both true')
+                return meetRef.update({
+                    status: true,
+                    selectedFriendsList:selectedList,
+                    backupSelectedFriendsList:{}
+                });
+                res.status(200).send('ok');
+            } else {
+                //console.log('some false')
+                return meetRef.update({
+                    selectedFriendsList: {},
+                    backupSelectedFriendsList:selectedList,
+                    status:false,
+                    });
                 res.status(200).send('ok');
             }
         }
@@ -132,6 +225,8 @@ exports.leaveMeet = functions.https.onRequest((req,res) => {
 });
 
 
+
+
 exports.initializeNewUser = functions.https.onRequest((req,res) => {
     const facebookId = req.body.id;
     const name = req.body.name;
@@ -141,7 +236,7 @@ exports.initializeNewUser = functions.https.onRequest((req,res) => {
     if (req.body.location === undefined){
         location = "";
     } else {
-        location = req.body.location;
+        location = req.body.location.name;
     }
     var gender;
     if(req.body.gender === undefined){
@@ -302,25 +397,25 @@ exports.sendAddFriendRequest = functions.https.onRequest((req,res) => {
 
 
 exports.initializeTwoWayFriendship = functions.https.onRequest((req,res) => {
-    const friendFacebookId = req.body.requester;
-    const facebookId = req.body.responsor;
-    var userRef = firestoreDb.collection('Users').doc(facebookId);
-    var friendDocRef = firestoreDb.collection('Users').doc(friendFacebookId);
+    const friendUid = req.body.requester;
+    const userUid = req.body.responser;
+    var userRef = firestoreDb.collection('Users').doc(userUid);
+    var friendDocRef = firestoreDb.collection('Users').doc(friendUid);
     return friendDocRef.get().then(doc => {
         if(doc.exists){
             //my ref add friend facebookId
-            const pr1 = userRef.collection('Friends_List').doc(friendFacebookId)
-            .set({facebookId:friendFacebookId}).catch(err => {
+            const pr1 = userRef.collection('Friends_List').doc(friendUid)
+            .set({uid:friendUid}).catch(err => {
                 console.log('Error getting documents', err);
             });
             //friend ref add my facebookId
-            const pr2 = friendDocRef.collection('Friends_List').doc(facebookId)
-            .set({facebookId:facebookId}).catch(err => {
+            const pr2 = friendDocRef.collection('Friends_List').doc(userUid)
+            .set({uid:userUid}).catch(err => {
                 console.log('Error getting documents', err);
             });
             //add user to friends meet if allFriends = true
             var meetsRef = firestoreDb.collection('Meets');
-            var friendMeetsQueryRef = meetsRef.where('creator', '==', friendFacebookId);
+            var friendMeetsQueryRef = meetsRef.where('creator', '==', friendUid);
             const pr3 = friendMeetsQueryRef.get().then(snapshot => {
                 var batch = firestoreDb.batch();
                 snapshot.forEach(doc => {
@@ -329,9 +424,9 @@ exports.initializeTwoWayFriendship = functions.https.onRequest((req,res) => {
                     var meet = doc.data();
                     var allFriends = meet.allFriends;
                     if(allFriends){
-                        var timeDoc = meet.participatingUsersList[friendFacebookId];
+                        var timeDoc = meet.participatingUsersList[friendUid];
                         var selectedFriendsDoc = meet.selectedFriendsList;
-                        selectedFriendsDoc[facebookId] = timeDoc;
+                        selectedFriendsDoc[userUid] = timeDoc;
                         var meetRef = meetsRef.doc(doc.id);
                         batch.update(meetRef, {selectedFriendsList:selectedFriendsDoc});
                         // return meetsRef.doc(doc.id).update({selectedFriendsList:selectedFriendsDoc}).catch(err => {
@@ -347,7 +442,7 @@ exports.initializeTwoWayFriendship = functions.https.onRequest((req,res) => {
             });
 
             //add friends to users meet if allFriends = true
-            var userMeetsQueryRef = meetsRef.where('creator', '==', facebookId);
+            var userMeetsQueryRef = meetsRef.where('creator', '==', userUid);
             const pr4 = userMeetsQueryRef.get().then(snapshot => {
                 var batch = firestoreDb.batch();
                 snapshot.forEach(doc => {
@@ -356,9 +451,9 @@ exports.initializeTwoWayFriendship = functions.https.onRequest((req,res) => {
                     var meet = doc.data();
                     var allFriends = meet.allFriends;
                     if(allFriends){
-                        var timeDoc = meet.participatingUsersList[facebookId];
+                        var timeDoc = meet.participatingUsersList[userUid];
                         var selectedFriendsDoc = meet.selectedFriendsList;
-                        selectedFriendsDoc[friendFacebookId] = timeDoc;
+                        selectedFriendsDoc[friendUid] = timeDoc;
                         var meetRef = meetsRef.doc(doc.id);
                         batch.update(meetRef, {selectedFriendsList:selectedFriendsDoc});
                     }
@@ -372,7 +467,7 @@ exports.initializeTwoWayFriendship = functions.https.onRequest((req,res) => {
             //const pr5 = sendAddFriendRequestAcceptedReceipt(facebookId,friendFacebookId);
             return Promise.all([pr1,pr2,pr3,pr4]).then(()=>{
                 res.status(200).send('ok');
-                return sendAddFriendRequestAcceptedReceipt(facebookId,friendFacebookId);
+                //return sendAddFriendRequestAcceptedReceipt(facebookId,friendFacebookId);
             }).catch(err => {
                 console.log('Error', err);
                 res.status(500).send('error');
@@ -414,3 +509,30 @@ function sendAddFriendRequestAcceptedReceipt(fromFacebookId, toFacebookId){
         console.log('Error getting document', err);
     });
 }
+
+
+exports.imageCacheTest = functions.https.onRequest((req,res) => {
+    let data=[
+        {
+            imageName:"Beautiful Image one",
+            imageUri:"https://s-media-cache-ak0.pinimg.com/736x/b1/21/df/b121df29b41b771d6610dba71834e512.jpg"
+        },
+        {
+            imageName:"Beautiful Image one",
+            imageUri:"https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTQpD8mz-2Wwix8hHbGgR-mCFQVFTF7TF7hU05BxwLVO1PS5j-rZA"
+        },
+        {
+            imageName:"Beautiful Image one",
+            imageUri:"https://s-media-cache-ak0.pinimg.com/736x/04/63/3f/04633fcc08f9d405064391bd80cb0828.jpg"
+        },
+        {
+            imageName:"Beautiful Image one",
+            imageUri:"https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcQRWkuUMpLyu3QnFu5Xsi_7SpbabzRtSis-_QhKas6Oyj3neJoeug"
+        },
+        {
+            imageName:"Beautiful Image one",
+            imageUri:"https://s-media-cache-ak0.pinimg.com/736x/a5/c9/43/a5c943e02b1c43b5cf7d5a4b1efdcabb.jpg"
+        }
+    ]
+    res.status(200).send(JSON.stringify(data));
+});
