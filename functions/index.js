@@ -175,7 +175,9 @@ exports.leaveMeet = functions.https.onRequest((req,res) => {
 
 exports.checkMeetStatus = functions.https.onRequest((req,res) => {
     const meetId = req.body.meetId;
+    const isPrivacyStateChanged = req.body.isPrivacyStateChanged;
     //console.log('meetId: ' + meetId);
+    //console.log('isPrivacyStateChanged',isPrivacyStateChanged);
     var meetRef = firestoreDb.collection('Meets').doc(meetId);
     return meetRef.get().then(doc => {
         if (!doc.exists) {
@@ -184,6 +186,30 @@ exports.checkMeetStatus = functions.https.onRequest((req,res) => {
         } else {
             //console.log('Document data:', doc.data());
             var meet = doc.data();
+
+            let pr1, pr2;
+
+            if(isPrivacyStateChanged){
+                var allowPeopleNearby = meet.allowPeopleNearby;
+                if(allowPeopleNearby){
+                    var coordinate = meet.place.coordinate;
+                    //console.log(coordinate);
+                    var lat = coordinate.lat;
+                    var lng = coordinate.lng;
+                    pr1 = geoFire.set(meetId, [lat, lng]).then(function() {
+                        console.log(meetId + " has been added to GeoFire");
+                    }, function(error) {
+                        console.log("Error: " + error);
+                    });
+                }else{
+                    pr1 = geoFire.remove(meetId).then(function() {
+                        console.log(meetId + "key has been removed from GeoFire");
+                      }, function(error) {
+                        console.log("Error: " + error);
+                      });
+                }
+            }
+            
 
             let status = meet.status;
             let selectedList;
@@ -200,21 +226,25 @@ exports.checkMeetStatus = functions.https.onRequest((req,res) => {
             let notFull = (parNo < maxNo) || (maxNo===1);
             if (now < endTime && notFull){
                 //console.log('both true')
-                return meetRef.update({
+                pr2 = meetRef.update({
                     status: true,
                     selectedFriendsList:selectedList,
                     backupSelectedFriendsList:{}
                 });
-                res.status(200).send('ok');
             } else {
                 //console.log('some false')
-                return meetRef.update({
+                pr2 = meetRef.update({
                     selectedFriendsList: {},
                     backupSelectedFriendsList:selectedList,
                     status:false,
                     });
-                res.status(200).send('ok');
             }
+            return Promise.all([pr1,pr2]).then(()=>{
+                res.status(200).send('ok');
+            }).catch(err => {
+                console.log('Error', err);
+                res.status(500).send('error');
+            });;
         }
     })
     .catch(err => {
@@ -535,4 +565,71 @@ exports.imageCacheTest = functions.https.onRequest((req,res) => {
         }
     ]
     res.status(200).send(JSON.stringify(data));
+});
+
+exports.handleParticipantsInvite = functions.https.onRequest((req,res) => {
+    let inviter = req.body.inviter;
+    let meetId = req.body.meetId;
+    let inviteList = req.body.inviteList;
+    var meetRef = firestoreDb.collection('Meets').doc(meetId);
+    return meetRef.get().then(doc => {
+        if (!doc.exists) {
+            //console.log('No such document!');
+            res.status(500).send('error');
+        } else {
+            //console.log('Document data:', doc.data());
+            var meet = doc.data();
+
+            let status = meet.status;
+            let selectedListObj;
+            if(status){
+                selectedListObj=meet.selectedFriendsList;
+            } else{
+                selectedListObj = meet.backupSelectedFriendsList;
+            }
+            let selectedUidList = Object.keys(selectedListObj);
+            inviteList.map((uid) => {
+                let uidObj = selectedListObj[uid];
+                //let invitedByCreator;
+                if(uidObj && !uidObj.invitedBy){
+                    //invitedByCreator = true;
+                } else {
+                    //invitedByCreator = false;
+                    if(!uidObj){
+                        uidObj = meet.participatingUsersList[meet.creator];
+                    }
+                    let uidInvitedByList = uidObj.invitedBy;
+                    if(!uidInvitedByList){
+                        uidInvitedByList=[];
+                     }
+                     if(!uidInvitedByList.includes(inviter)){
+                        uidInvitedByList.push(inviter);
+                     }
+                     
+                     uidObj.invitedBy = uidInvitedByList;
+                     selectedListObj[uid]=uidObj;
+                }
+                
+            });
+            if(status){
+                return meetRef.update({selectedFriendsList:selectedListObj}).then(()=>{
+                    res.status(200).send('ok');
+                }).catch((error)=>{
+                    res.status(500).send(error);
+                });
+            } else {
+                return meetRef.update({backupSelectedFriendsList:selectedListObj}).then(()=>{
+                    res.status(200).send('ok');
+                }).catch((error)=>{
+                    res.status(500).send(error);
+                });;
+            }
+            
+            
+        }
+    })
+    .catch(err => {
+        console.log('Error getting document', err);
+        res.status(500).send('error');
+    });
 });
