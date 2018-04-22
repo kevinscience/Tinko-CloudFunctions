@@ -72,6 +72,7 @@ exports.removeExpiredMeets = functions.https.onRequest((req, res) => {
 
 exports.participateMeet = functions.https.onRequest((req,res) => {
     //console.log('get in participateMeet');
+    //console.log(req.body);
     const userUid =req.body.userUid;
     //console.log('userFacebookId: ' + userFacebookId);
     const meetId = req.body.meetId;
@@ -176,6 +177,8 @@ exports.leaveMeet = functions.https.onRequest((req,res) => {
 exports.checkMeetStatus = functions.https.onRequest((req,res) => {
     const meetId = req.body.meetId;
     const isPrivacyStateChanged = req.body.isPrivacyStateChanged;
+    const deletedList = req.body.deletedList;
+    const newAddedList = req.body.newAddedList;
     //console.log('meetId: ' + meetId);
     //console.log('isPrivacyStateChanged',isPrivacyStateChanged);
     var meetRef = firestoreDb.collection('Meets').doc(meetId);
@@ -217,6 +220,19 @@ exports.checkMeetStatus = functions.https.onRequest((req,res) => {
                 selectedList=meet.selectedFriendsList;
             } else{
                 selectedList = meet.backupSelectedFriendsList;
+            }
+
+            if(deletedList){
+                deletedList.map((uid)=>{
+                    delete selectedList[uid];
+                });
+            }
+
+            if(newAddedList){
+                let timeStatusDic = meet.participatingUsersList[meet.creator];
+                newAddedList.map((uid)=>{
+                    selectedList[uid]=timeStatusDic;
+                });
             }
             
             let endTime = meet.endTime;
@@ -262,6 +278,7 @@ exports.initializeNewUser = functions.https.onRequest((req,res) => {
     const name = req.body.name;
     const email = req.body.email;
     const uid = req.body.uid;
+    //const photoURL = req.body.picture.data.url;
     var location;
     if (req.body.location === undefined){
         location = "";
@@ -282,7 +299,7 @@ exports.initializeNewUser = functions.https.onRequest((req,res) => {
         username: name,
         email: email,
         uid: uid,
-        photoURL: "https://graph.facebook.com/" + facebookId + "/picture?type=normal",
+        photoURL: `https://graph.facebook.com/${facebookId}/picture?type=normal`,
         gender: gender,
         location: location
     };
@@ -633,3 +650,4 @@ exports.handleParticipantsInvite = functions.https.onRequest((req,res) => {
         res.status(500).send('error');
     });
 });
+
