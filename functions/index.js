@@ -558,6 +558,30 @@ function sendAddFriendRequestAcceptedReceipt(fromFacebookId, toFacebookId){
 }
 
 
+exports.malfunctionFunction = functions.https.onRequest((req,res) => {
+    var batch = firestoreDb.batch();
+    var meetsRef = firestoreDb.collection('Meets');
+    meetsRef.get()
+    .then(snapshot => {
+        snapshot.forEach(doc => {
+            console.log(doc.id, '=>', doc.data());
+            let meet = doc.data();
+            let meetId = doc.id;
+            let participatingUsersList = meet.participatingUsersList;
+            let participatingUsersArray = Object.keys(participatingUsersList);
+            let meetRef = meetsRef.doc(meetId);
+            batch.update(meetRef, {participatingUsersArray:participatingUsersArray});
+        });
+        return batch.commit().then(()=>{
+            res.status(200).send('ok');
+        })
+    })
+    .catch(err => {
+        console.log('Error getting documents', err);
+    });
+    
+});
+
 exports.imageCacheTest = functions.https.onRequest((req,res) => {
     let data=[
         {
