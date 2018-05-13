@@ -192,29 +192,31 @@ exports.checkMeetStatus = functions.https.onRequest((req,res) => {
 
             let pr1, pr2;
 
-            if(isPrivacyStateChanged){
-                var allowPeopleNearby = meet.allowPeopleNearby;
-                if(allowPeopleNearby){
-                    var coordinate = meet.place.coordinate;
-                    //console.log(coordinate);
-                    var lat = coordinate.lat;
-                    var lng = coordinate.lng;
-                    pr1 = geoFire.set(meetId, [lat, lng]).then(function() {
-                        console.log(meetId + " has been added to GeoFire");
-                    }, function(error) {
-                        console.log("Error: " + error);
-                    });
-                }else{
-                    pr1 = geoFire.remove(meetId).then(function() {
-                        console.log(meetId + "key has been removed from GeoFire");
-                      }, function(error) {
-                        console.log("Error: " + error);
-                      });
-                }
-            }
-            
+            // if(isPrivacyStateChanged){
+            //     var allowPeopleNearby = meet.allowPeopleNearby;
+            //     if(allowPeopleNearby){
+            //         var coordinate = meet.place.coordinate;
+            //         //console.log(coordinate);
+            //         var lat = coordinate.lat;
+            //         var lng = coordinate.lng;
+            //         pr1 = geoFire.set(meetId, [lat, lng]).then(function() {
+            //             console.log(meetId + " has been added to GeoFire");
+            //         }, function(error) {
+            //             console.log("Error: " + error);
+            //         });
+            //     }else{
+            //         pr1 = geoFire.remove(meetId).then(function() {
+            //             console.log(meetId + "key has been removed from GeoFire");
+            //           }, function(error) {
+            //             console.log("Error: " + error);
+            //           });
+            //     }
+            // }
 
+
+            //var allowPeopleNearby = meet.allowPeopleNearby;
             let status = meet.status;
+            let dismissed = meet.dismissed;
             let selectedList;
             if(status){
                 selectedList=meet.selectedFriendsList;
@@ -234,14 +236,32 @@ exports.checkMeetStatus = functions.https.onRequest((req,res) => {
                     selectedList[uid]=timeStatusDic;
                 });
             }
-            
+
+            let allowPeopleNearby = meet.allowPeopleNearby;
             let endTime = meet.endTime;
             let now = new Date();
             let maxNo = meet.maxNo;
             let parNo = Object.keys(meet.participatingUsersList).length;
             let notFull = (parNo < maxNo) || (maxNo===1);
-            if (now < endTime && notFull){
+            if (now < endTime && notFull && !dismissed){
                 //console.log('both true')
+                if(allowPeopleNearby){
+                    let coordinate = meet.place.coordinate;
+                    //console.log(coordinate);
+                    let lat = coordinate.lat;
+                    let lng = coordinate.lng;
+                    pr1 = geoFire.set(meetId, [lat, lng]).then(function() {
+                        console.log(meetId + " has been added to GeoFire");
+                    }, function(error) {
+                        console.log("Error: " + error);
+                    });
+                }else{
+                    pr1 = geoFire.remove(meetId).then(function() {
+                        console.log(meetId + "key has been removed from GeoFire");
+                    }, function(error) {
+                        console.log("Error: " + error);
+                    });
+                }
                 pr2 = meetRef.update({
                     status: true,
                     selectedFriendsList:selectedList,
@@ -249,6 +269,11 @@ exports.checkMeetStatus = functions.https.onRequest((req,res) => {
                 });
             } else {
                 //console.log('some false')
+                pr1 = geoFire.remove(meetId).then(function() {
+                    console.log(meetId + "key has been removed from GeoFire");
+                }, function(error) {
+                    console.log("Error: " + error);
+                });
                 pr2 = meetRef.update({
                     selectedFriendsList: {},
                     backupSelectedFriendsList:selectedList,
@@ -260,7 +285,7 @@ exports.checkMeetStatus = functions.https.onRequest((req,res) => {
             }).catch(err => {
                 console.log('Error', err);
                 res.status(500).send('error');
-            });;
+            });
         }
     })
     .catch(err => {
@@ -278,6 +303,8 @@ exports.initializeNewUser = functions.https.onRequest((req,res) => {
     const name = req.body.name;
     const email = req.body.email;
     const uid = req.body.uid;
+    const fbToken = req.body.fbToken;
+    const fbTokenExpires = req.body.fbTokenExpires;
     //const photoURL = req.body.picture.data.url;
     var location;
     if (req.body.location === undefined){
@@ -301,43 +328,34 @@ exports.initializeNewUser = functions.https.onRequest((req,res) => {
         uid: uid,
         photoURL: `https://graph.facebook.com/${facebookId}/picture?type=normal`,
         gender: gender,
-        location: location
+        location: location,
+         fbAutoAdd:true
     };
     return userRef.set(userData).then(ref => {
-        //console.log('Added document with ID: ', ref.id);
-        var friendsList = req.body.friends.data;
-        //console.log('friendsList: ', friendsList);
-        //friendsList:  [ { id: [ '1503367089694364', '107771053169905' ],name: [ 'Xue Donghua', 'Kevin Schrute' ] } ]
-        // var friendsIdList = friendsList[0].id;
-        // console.log('friendsIdList: ', friendsIdList);
-        //FOR LOOP for Friends adding operation
-        Promise.map(friendsList, function (friendInfo){
-            let friendFacebookId = friendInfo.id;
-            initializeFriendShip(friendFacebookId, uid);
-        }).then(()=>{
-            res.status(200).send('ok');
-        });
+
+        return userRef.collection('Settings').doc('secrets').set({fbToken:fbToken, fbTokenExpires:fbTokenExpires})
+            .then(()=>{
+                //console.log('Added document with ID: ', ref.id);
+                var friendsList = req.body.friends.data;
+                //console.log('friendsList: ', friendsList);
+                //friendsList:  [ { id: [ '1503367089694364', '107771053169905' ],name: [ 'Xue Donghua', 'Kevin Schrute' ] } ]
+                // var friendsIdList = friendsList[0].id;
+                // console.log('friendsIdList: ', friendsIdList);
+                //FOR LOOP for Friends adding operation
+                Promise.map(friendsList, function (friendInfo){
+                    let friendFacebookId = friendInfo.id;
+                    initializeFriendShip(friendFacebookId, uid,facebookId);
+                }).then(()=>{
+                    res.status(200).send('ok');
+                });
+            })
+            .catch((error)=>console.log(error));
     }).catch(err => {
         console.log('Error getting documents', err);
     });
-    // return userRef.get()
-    //     .then(doc => {
-    //         if (doc.exists) {
-    //             //console.log('Document data exist:', doc.data());
-    //             res.status(200).send('ok');
-    //          } else { //user does not exist
-    //             //console.log('No such document!');
-                
-                
-    //         }
-    //     })
-    //     .catch(err => {
-    //         console.log('Error getting document', err);
-    //         res.status(500).send('test error');
-    //     });
 });
 
-function initializeFriendShip(friendFacebookId,uid){
+function initializeFriendShip(friendFacebookId,uid, facebookId){
     //console.log('friendFacebookId: ', friendFacebookId);
     let usersColRef = firestoreDb.collection('Users');
     let userRef = usersColRef.doc(uid);
@@ -355,16 +373,18 @@ function initializeFriendShip(friendFacebookId,uid){
                 console.log(doc.id, '=>', doc.data());
                 let friendUid = doc.id;
                 let friendDocRef = usersColRef.doc(friendUid);
+                // TODO
+                //IF fbAutoAdd is true, doing so and send newFriendsRequest type 2, if fbAutoAdd is false, send newFriendsRequest type 0
                 //my ref add friend facebookId
                 console.log('friendUid', friendUid);
                 const pr1 = userRef.collection('Friends_List').doc(friendUid)
-                .set({uid:friendUid}).catch(err => {
+                .set({uid:friendUid, facebookId:friendFacebookId}).catch(err => {
                     console.log('Error getting documents', err);
                 });
                 //friend ref add my facebookId
                 console.log('uid', uid);
                 const pr2 = friendDocRef.collection('Friends_List').doc(uid)
-                .set({uid:uid}).catch(err => {
+                .set({uid:uid, facebookId:facebookId}).catch(err => {
                     console.log('Error getting documents', err);
                 });
                 //add user to friends meet if allFriends = true
@@ -580,6 +600,85 @@ exports.malfunctionFunction = functions.https.onRequest((req,res) => {
         console.log('Error getting documents', err);
     });
     
+});
+
+exports.checkAllMeetsStatus = functions.https.onRequest((req,res)=>{
+    let meetsRef = firestoreDb.collection('Meets');
+    meetsRef.get()
+        .then(snapshot => {
+            let promises = [];
+            snapshot.forEach(doc => {
+                //console.log(doc.id, '=>', doc.data());
+                let meetId = doc.id;
+                let meetRef = firestoreDb.collection('Meets').doc(meetId);
+                let pr1, pr2;
+                let meet = doc.data();
+                let status = meet.status;
+                let dismissed = meet.dismissed;
+                let selectedList;
+                if(status){
+                    selectedList=meet.selectedFriendsList;
+                } else{
+                    selectedList = meet.backupSelectedFriendsList;
+                }
+
+                let allowPeopleNearby = meet.allowPeopleNearby;
+                let endTime = meet.endTime;
+                let now = new Date();
+                let maxNo = meet.maxNo;
+                let parNo = Object.keys(meet.participatingUsersList).length;
+                let notFull = (parNo < maxNo) || (maxNo===1);
+                if (now < endTime && notFull && !dismissed){
+                    //console.log('both true')
+                    if(allowPeopleNearby){
+                        let coordinate = meet.place.coordinate;
+                        //console.log(coordinate);
+                        let lat = coordinate.lat;
+                        let lng = coordinate.lng;
+                        pr1 = geoFire.set(meetId, [lat, lng]).then(function() {
+                            console.log(meetId + " has been added to GeoFire");
+                        }, function(error) {
+                            console.log("Error: " + error);
+                        });
+                    }else{
+                        pr1 = geoFire.remove(meetId).then(function() {
+                            console.log(meetId + "key has been removed from GeoFire");
+                        }, function(error) {
+                            console.log("Error: " + error);
+                        });
+                    }
+                    pr2 = meetRef.update({
+                        status: true,
+                        selectedFriendsList:selectedList,
+                        backupSelectedFriendsList:{}
+                    });
+                } else {
+                    //console.log('some false')
+                    pr1 = geoFire.remove(meetId).then(function() {
+                        console.log(meetId + "key has been removed from GeoFire");
+                    }, function(error) {
+                        console.log("Error: " + error);
+                    });
+                    pr2 = meetRef.update({
+                        selectedFriendsList: {},
+                        backupSelectedFriendsList:selectedList,
+                        status:false,
+                    });
+                }
+                promises.push(pr1,pr2);
+
+            });
+            return Promise.all(promises).then(()=>{
+                res.status(200).send('ok');
+            }).catch(err => {
+                console.log('Error', err);
+                res.status(500).send('error');
+            });
+
+        })
+        .catch(err => {
+            console.log('Error getting documents', err);
+        });
 });
 
 exports.imageCacheTest = functions.https.onRequest((req,res) => {
