@@ -1,4 +1,3 @@
-const SocketIOClient = require('socket.io-client');
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 admin.initializeApp(functions.config().firebase);
@@ -6,7 +5,6 @@ const GeoFire = require('geofire');
 const geoFire = new GeoFire(admin.database().ref("Meets"));
 var firestoreDb = admin.firestore();
 var Promise = require("bluebird");
-let Socket = SocketIOClient('https://shuaiyixu.xyz/');
 
 // userFacebookId equals facebookId
 
@@ -411,7 +409,7 @@ function initializeFriendShip(friendFacebookId,uid, facebookId){
                     //add user to friends meet if allFriends = true
                     console.log('afterwords');
                     var meetsRef = firestoreDb.collection('Meets');
-                    var meetsQueryRef = meetsRef.where('creator', '==', friendUid);
+                    var meetsQueryRef = meetsRef.where('creator', '==', friendUid).where('status','==',true);
                     const pr5 = meetsQueryRef.get().then(snapshot => {
                         var batch = firestoreDb.batch();
                         snapshot.forEach(doc => {
@@ -419,7 +417,8 @@ function initializeFriendShip(friendFacebookId,uid, facebookId){
                             //modify meet selectedFriendsList
                             var meet = doc.data();
                             var allFriends = meet.allFriends;
-                            if(allFriends){
+                            let status = meet.status;
+                            if(allFriends && status){
                                 var timeDoc = meet.participatingUsersList[friendUid];
                                 var selectedFriendsDoc = meet.selectedFriendsList;
                                 selectedFriendsDoc[uid] = timeDoc;
@@ -437,7 +436,7 @@ function initializeFriendShip(friendFacebookId,uid, facebookId){
                         console.log('Error getting documents', err);
                     });
                     //add friend to user's meet if allFriends = true
-                    var userMeetsQueryRef = meetsRef.where('creator', '==', uid);
+                    var userMeetsQueryRef = meetsRef.where('creator', '==', uid).where('status','==',true);
                     const pr6 = meetsQueryRef.get().then(snapshot => {
                         var batch = firestoreDb.batch();
                         snapshot.forEach(doc => {
@@ -445,7 +444,8 @@ function initializeFriendShip(friendFacebookId,uid, facebookId){
                             //modify meet selectedFriendsList
                             var meet = doc.data();
                             var allFriends = meet.allFriends;
-                            if(allFriends){
+                            let status = meet.status;
+                            if(allFriends && status){
                                 var timeDoc = meet.participatingUsersList[uid];
                                 var selectedFriendsDoc = meet.selectedFriendsList;
                                 selectedFriendsDoc[friendUid] = timeDoc;
@@ -542,9 +542,21 @@ exports.initializeTwoWayFriendship = functions.https.onRequest((req,res) => {
                 .set({uid:userUid,facebookId:userFacebookId}).catch(err => {
                     console.log('Error getting documents', err);
                 });
+            //user send accept receipt to friend
+            const pr5 = friendDocRef.collection('NewFriendsRequest').doc(userUid)
+                .set({
+                    requester:userUid,
+                    responser:friendUid,
+                    type:1,
+                    msg:'',
+                    timestamp:new Date().getTime(),
+                }).catch((error) => console.log(error));
+            // set accept to user's newFriendsRequest request
+            const pr6 = userRef.collection('NewFriendsRequest').doc(friendUid).update({type:1})
+                .catch((error) => console.log(error));
             //add user to friends meet if allFriends = true
             var meetsRef = firestoreDb.collection('Meets');
-            var friendMeetsQueryRef = meetsRef.where('creator', '==', friendUid);
+            var friendMeetsQueryRef = meetsRef.where('creator', '==', friendUid).where('status','==',true);
             const pr3 = friendMeetsQueryRef.get().then(snapshot => {
                 var batch = firestoreDb.batch();
                 snapshot.forEach(doc => {
@@ -552,7 +564,8 @@ exports.initializeTwoWayFriendship = functions.https.onRequest((req,res) => {
                     //modify meet selectedFriendsList
                     var meet = doc.data();
                     var allFriends = meet.allFriends;
-                    if(allFriends){
+                    let status = meet.status;
+                    if(allFriends && status){
                         var timeDoc = meet.participatingUsersList[friendUid];
                         var selectedFriendsDoc = meet.selectedFriendsList;
                         selectedFriendsDoc[userUid] = timeDoc;
@@ -571,7 +584,7 @@ exports.initializeTwoWayFriendship = functions.https.onRequest((req,res) => {
             });
 
             //add friends to users meet if allFriends = true
-            var userMeetsQueryRef = meetsRef.where('creator', '==', userUid);
+            var userMeetsQueryRef = meetsRef.where('creator', '==', userUid).where('status','==',true);
             const pr4 = userMeetsQueryRef.get().then(snapshot => {
                 var batch = firestoreDb.batch();
                 snapshot.forEach(doc => {
@@ -579,7 +592,8 @@ exports.initializeTwoWayFriendship = functions.https.onRequest((req,res) => {
                     //modify meet selectedFriendsList
                     var meet = doc.data();
                     var allFriends = meet.allFriends;
-                    if(allFriends){
+                    let status = meet.status;
+                    if(allFriends && status){
                         var timeDoc = meet.participatingUsersList[userUid];
                         var selectedFriendsDoc = meet.selectedFriendsList;
                         selectedFriendsDoc[friendUid] = timeDoc;
@@ -594,7 +608,7 @@ exports.initializeTwoWayFriendship = functions.https.onRequest((req,res) => {
                 console.log('Error getting documents', err);
             });
             //const pr5 = sendAddFriendRequestAcceptedReceipt(facebookId,friendFacebookId);
-            return Promise.all([pr1,pr2,pr3,pr4]).then(()=>{
+            return Promise.all([pr1,pr2,pr3,pr4,pr5,pr6]).then(()=>{
                 res.status(200).send('ok');
                 //return sendAddFriendRequestAcceptedReceipt(facebookId,friendFacebookId);
             }).catch(err => {
@@ -665,7 +679,7 @@ exports.malfunctionFunction = functions.https.onRequest((req,res) => {
 });
 
 exports.checkAllMeetsStatus = functions.https.onRequest((req,res)=>{
-    let meetsRef = firestoreDb.collection('Meets');
+    let meetsRef = firestoreDb.collection('Meets').where('status','==', true).where('endTime','<',new Date());
     meetsRef.get()
         .then(snapshot => {
             let promises = [];
@@ -740,6 +754,7 @@ exports.checkAllMeetsStatus = functions.https.onRequest((req,res)=>{
         })
         .catch(err => {
             console.log('Error getting documents', err);
+            res.status(500).send('error');
         });
 });
 
