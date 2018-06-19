@@ -298,6 +298,7 @@ exports.checkMeetStatus = functions.https.onRequest((req,res) => {
 
 
 exports.initializeNewUser = functions.https.onRequest((req,res) => {
+    const linkFacebookMode = req.body.linkFacebookMode;
     const facebookId = req.body.id;
     const name = req.body.name;
     const email = req.body.email;
@@ -320,38 +321,72 @@ exports.initializeNewUser = functions.https.onRequest((req,res) => {
     //console.log('facebookId', facebookId);
 
     var userRef = firestoreDb.collection('Users').doc(uid);
-    var userData = {
-        facebookId : facebookId,
-        username: name,
-        email: email,
-        uid: uid,
-        photoURL: `https://graph.facebook.com/${facebookId}/picture?type=normal`,
-        gender: gender,
-        location: location,
-        fbAutoAdd:true
-    };
-    return userRef.set(userData).then(ref => {
 
-        return userRef.collection('Settings').doc('secrets').set({fbToken:fbToken, fbTokenExpires:fbTokenExpires})
-            .then(()=>{
-                //console.log('Added document with ID: ', ref.id);
-                let friendsList = req.body.friends.data;
-                //console.log('friendsList: ', friendsList);
-                //friendsList:  [ { id: [ '1503367089694364', '107771053169905' ],name: [ 'Xue Donghua', 'Kevin Schrute' ] } ]
-                // var friendsIdList = friendsList[0].id;
-                // console.log('friendsIdList: ', friendsIdList);
-                //FOR LOOP for Friends adding operation
-                Promise.map(friendsList, function (friendInfo){
-                    let friendFacebookId = friendInfo.id;
-                    initializeFriendShip(friendFacebookId, uid,facebookId);
-                }).then(()=>{
-                    res.status(200).send('ok');
-                });
-            })
-            .catch((error)=>console.log(error));
-    }).catch(err => {
-        console.log('Error getting documents', err);
-    });
+    if(linkFacebookMode){
+        const originalUserData = req.body.userData;
+        let userData = {};
+        userData.facebookId=facebookId;
+        if(originalUserData.email.includes(originalUserData.username)){
+            userData.username = name;
+        }
+        if(originalUserData.photoURL==='https://firebasestorage.googleapis.com/v0/b/tinko-64673.appspot.com/o/Users%2FAvatar%2Favatar-placeholder.png?alt=media&token=68f12225-4266-4888-8aaa-98315112c2ed'){
+            userData.photoURL=`https://graph.facebook.com/${facebookId}/picture?type=normal`;
+        }
+        if(gender===''){
+            userData.gender=gender;
+        }
+        if(location===''){
+            userData.location=location;
+        }
+        userData.fbAutoAdd=true;
+        return userRef.update(userData).then(()=>{
+            return userRef.collection('Settings').doc('secrets').set({fbToken:fbToken, fbTokenExpires:fbTokenExpires})
+                .then(()=>{
+                    let friendsList = req.body.friends.data;
+                    Promise.map(friendsList, function (friendInfo){
+                        let friendFacebookId = friendInfo.id;
+                        initializeFriendShip(friendFacebookId, uid,facebookId);
+                    }).then(()=>{
+                        res.status(200).send('ok');
+                    });
+                })
+                .catch((error)=>console.log(error));
+        })
+
+    }else{
+        let userData = {
+            facebookId : facebookId,
+            username: name,
+            email: email,
+            uid: uid,
+            photoURL: `https://graph.facebook.com/${facebookId}/picture?type=normal`,
+            gender: gender,
+            location: location,
+            fbAutoAdd:true
+        };
+        return userRef.set(userData).then(ref => {
+
+            return userRef.collection('Settings').doc('secrets').set({fbToken:fbToken, fbTokenExpires:fbTokenExpires})
+                .then(()=>{
+                    //console.log('Added document with ID: ', ref.id);
+                    let friendsList = req.body.friends.data;
+                    //console.log('friendsList: ', friendsList);
+                    //friendsList:  [ { id: [ '1503367089694364', '107771053169905' ],name: [ 'Xue Donghua', 'Kevin Schrute' ] } ]
+                    // var friendsIdList = friendsList[0].id;
+                    // console.log('friendsIdList: ', friendsIdList);
+                    //FOR LOOP for Friends adding operation
+                    Promise.map(friendsList, function (friendInfo){
+                        let friendFacebookId = friendInfo.id;
+                        initializeFriendShip(friendFacebookId, uid,facebookId);
+                    }).then(()=>{
+                        res.status(200).send('ok');
+                    });
+                })
+                .catch((error)=>console.log(error));
+        }).catch(err => {
+            console.log('Error getting documents', err);
+        });
+    }
 });
 
 function initializeFriendShip(friendFacebookId,uid, facebookId){
