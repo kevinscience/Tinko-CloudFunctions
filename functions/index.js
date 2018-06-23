@@ -305,6 +305,7 @@ exports.initializeNewUser = functions.https.onRequest((req,res) => {
     const uid = req.body.uid;
     const fbToken = req.body.fbToken;
     const fbTokenExpires = req.body.fbTokenExpires;
+    let friendsList = req.body.friends.data;
     //const photoURL = req.body.picture.data.url;
     var location;
     if (req.body.location === undefined){
@@ -339,16 +340,20 @@ exports.initializeNewUser = functions.https.onRequest((req,res) => {
             userData.location=location;
         }
         userData.fbAutoAdd=true;
+        let userPhoneNumber = originalUserData.phoneNumber;
         return userRef.update(userData).then(()=>{
             return userRef.collection('Settings').doc('secrets').set({fbToken:fbToken, fbTokenExpires:fbTokenExpires})
                 .then(()=>{
-                    let friendsList = req.body.friends.data;
-                    Promise.map(friendsList, function (friendInfo){
+                    let pr1 = updateInfoToAllMyFriends(uid,'facebook',facebookId);
+                    let pr2 = Promise.map(friendsList, function (friendInfo){
                         let friendFacebookId = friendInfo.id;
-                        initializeFriendShip(friendFacebookId, uid,facebookId);
-                    }).then(()=>{
-                        res.status(200).send('ok');
+                        initializeFriendShip(friendFacebookId, uid,facebookId, userPhoneNumber);
                     });
+                    //     .then(()=>{
+                    //     res.status(200).send('ok');
+                    // });
+                    return Promise.all([pr1,pr2]).then(()=>res.status(200).send('ok'));
+
                 })
                 .catch((error)=>console.log(error));
         })
@@ -369,7 +374,6 @@ exports.initializeNewUser = functions.https.onRequest((req,res) => {
             return userRef.collection('Settings').doc('secrets').set({fbToken:fbToken, fbTokenExpires:fbTokenExpires})
                 .then(()=>{
                     //console.log('Added document with ID: ', ref.id);
-                    let friendsList = req.body.friends.data;
                     //console.log('friendsList: ', friendsList);
                     //friendsList:  [ { id: [ '1503367089694364', '107771053169905' ],name: [ 'Xue Donghua', 'Kevin Schrute' ] } ]
                     // var friendsIdList = friendsList[0].id;
@@ -389,7 +393,7 @@ exports.initializeNewUser = functions.https.onRequest((req,res) => {
     }
 });
 
-function initializeFriendShip(friendFacebookId,uid, facebookId){
+function initializeFriendShip(friendFacebookId,uid, facebookId, phoneNumber){
     //console.log('friendFacebookId: ', friendFacebookId);
     let usersColRef = firestoreDb.collection('Users');
     let userRef = usersColRef.doc(uid);
@@ -411,16 +415,25 @@ function initializeFriendShip(friendFacebookId,uid, facebookId){
                 let friendFBAutoAdd = doc.data().fbAutoAdd;
                 let promises = [];
                 if(friendFBAutoAdd){
+                    let friendPhoneNumber = doc.data().phoneNumber;
+                    if(!friendPhoneNumber){
+                        friendPhoneNumber={}
+                    }
+                    let userPhoneNumber = phoneNumber;
+                    if(!userPhoneNumber){
+                        userPhoneNumber={}
+                    }
+
                     //my ref add friend facebookId
                     console.log('friendUid', friendUid);
                     const pr1 = userRef.collection('Friends_List').doc(friendUid)
-                        .set({uid:friendUid, facebookId:friendFacebookId}).catch(err => {
+                        .set({uid:friendUid, facebookId:friendFacebookId, phoneNumber:friendPhoneNumber}).catch(err => {
                             console.log('Error getting documents', err);
                         });
                     //friend ref add my facebookId
                     console.log('uid', uid);
                     const pr2 = friendDocRef.collection('Friends_List').doc(uid)
-                        .set({uid:uid, facebookId:facebookId}).catch(err => {
+                        .set({uid:uid, facebookId:facebookId,phoneNumber:userPhoneNumber}).catch(err => {
                             console.log('Error getting documents', err);
                         });
                     //my newFriendsRequestRef add friend type2 request
@@ -472,7 +485,7 @@ function initializeFriendShip(friendFacebookId,uid, facebookId){
                     });
                     //add friend to user's meet if allFriends = true
                     var userMeetsQueryRef = meetsRef.where('creator', '==', uid).where('status','==',true);
-                    const pr6 = meetsQueryRef.get().then(snapshot => {
+                    const pr6 = userMeetsQueryRef.get().then(snapshot => {
                         var batch = firestoreDb.batch();
                         snapshot.forEach(doc => {
                             console.log(doc.id, '=>', doc.data());
@@ -516,8 +529,45 @@ function initializeFriendShip(friendFacebookId,uid, facebookId){
         .catch(err => {
             console.log('Error getting documents', err);
         });
-
 }
+
+function updateInfoToAllMyFriends(uid,code,data){
+    let userFriendsList = firestoreDb.collection('Users').doc(uid).collection('Friends_List');
+    userFriendsList.get().then(function(querySnapshot) {
+        var batch = firestoreDb.batch();
+        querySnapshot.forEach(function(doc) {
+            // doc.data() is never undefined for query doc snapshots
+            console.log(doc.id, " => ", doc.data());
+            let friendUid = doc.id;
+            let friendFriendsListOfMe = firestoreDb.collection('Users').doc(friendUid).collection('Friends_List').doc(uid);
+            if(code==='facebook'){
+                batch.update(friendFriendsListOfMe,{facebookId:data});
+            }else{
+                batch.update(friendFriendsListOfMe,{phoneNumber:data});
+            }
+
+        });
+        return batch.commit().catch(err => {
+            console.log('Error batch commit', err);
+        });
+    });
+}
+
+exports.linkPhoneNumber = functions.https.onRequest((req,res)=>{
+    let uid = req.body.uid;
+    let phoneNumber = req.body.phoneNumber;
+    let countryCode = req.body.countryCode;
+    let userRef = firestoreDb.collection('Users').doc(uid);
+    let data = {number:phoneNumber,countryCode:countryCode};
+    return userRef.update({phoneNumber:data}).then(()=>{
+        updateInfoToAllMyFriends(uid,'phoneNumber',data);
+        res.status(200).send('ok');
+    }).catch(err => {
+        console.log('Error', err);
+        res.status(500).send('error');
+    });
+
+});
 
 exports.sendAddFriendRequest = functions.https.onRequest((req,res) => {
     const requester = req.body.requester;
@@ -562,19 +612,27 @@ exports.initializeTwoWayFriendship = functions.https.onRequest((req,res) => {
     const friendUid = req.body.requester;
     const userUid = req.body.responser;
     const userFacebookId = req.body.requesterFacebookId;
+    let userPhoneNumber = req.body.requesterPhoneNumber;
+    if(!userPhoneNumber){
+        userPhoneNumber={};
+    }
     var userRef = firestoreDb.collection('Users').doc(userUid);
     var friendDocRef = firestoreDb.collection('Users').doc(friendUid);
     return friendDocRef.get().then(doc => {
         if(doc.exists){
             let friendFacebookId = doc.data().facebookId;
+            let friendPhoneNumber = doc.data().phoneNumber;
+            if(!friendPhoneNumber){
+                friendPhoneNumber={};
+            }
             //my ref add friend facebookId
             const pr1 = userRef.collection('Friends_List').doc(friendUid)
-                .set({uid:friendUid,facebookId:friendFacebookId}).catch(err => {
+                .set({uid:friendUid,facebookId:friendFacebookId,phoneNumber:friendPhoneNumber}).catch(err => {
                     console.log('Error getting documents', err);
                 });
             //friend ref add my facebookId
             const pr2 = friendDocRef.collection('Friends_List').doc(userUid)
-                .set({uid:userUid,facebookId:userFacebookId}).catch(err => {
+                .set({uid:userUid,facebookId:userFacebookId,phoneNumber:userPhoneNumber}).catch(err => {
                     console.log('Error getting documents', err);
                 });
             //user send accept receipt to friend
